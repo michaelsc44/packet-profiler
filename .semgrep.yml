@@ -1,0 +1,121 @@
+rules:
+  # ──────────────────────────────────────────────────────────────────────────
+  # packet-profiler specific rules
+  #
+  # This project shells out to tcpdump and parses untrusted pcap files.
+  # Both surfaces are high-risk: shell injection on the capture side,
+  # parser exploits + arbitrary deserialization on the analysis side.
+  # ──────────────────────────────────────────────────────────────────────────
+
+  - id: packet-profiler-no-hardcoded-secrets
+    patterns:
+      - pattern: $KEY = "..."
+      - metavariable-regex:
+          metavariable: $KEY
+          regex: (?i)(api_key|apikey|api_token|auth_token|secret_key|access_key|geoip_license_key)
+    message: >
+      Hardcoded credential found in variable '$KEY'. Use environment variables
+      or a secrets manager instead.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: CWE-798
+
+  - id: packet-profiler-no-shell-true-with-user-input
+    patterns:
+      - pattern: subprocess.$FUNC(..., shell=True, ...)
+      - pattern-not: subprocess.$FUNC("...", shell=True, ...)
+    message: >
+      subprocess called with shell=True and a non-literal command string.
+      Capture inputs (interface name, BPF filter) are user-controlled — this
+      is a shell injection vector. Pass argv as a list with shell=False.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: CWE-78
+
+  - id: packet-profiler-no-pickle
+    patterns:
+      - pattern-either:
+          - pattern: pickle.loads(...)
+          - pattern: pickle.load(...)
+    message: >
+      Do not deserialize untrusted data with pickle — it allows arbitrary
+      code execution. Use JSON, Parquet, or DuckDB tables for persistence.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: CWE-502
+
+  - id: packet-profiler-no-eval
+    pattern: eval(...)
+    message: >
+      Avoid eval() — it executes arbitrary Python code and is a common
+      injection vector.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: CWE-95
+
+  - id: packet-profiler-no-yaml-unsafe-load
+    patterns:
+      - pattern-either:
+          - pattern: yaml.load($DATA)
+          - pattern: yaml.load($DATA, Loader=yaml.Loader)
+          - pattern: yaml.load($DATA, Loader=yaml.UnsafeLoader)
+          - pattern: yaml.load($DATA, Loader=yaml.FullLoader)
+    message: >
+      Use yaml.safe_load() — yaml.load() with the default or unsafe loaders
+      can execute arbitrary Python objects from a YAML document.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: CWE-502
+
+  - id: packet-profiler-insecure-temp-file
+    patterns:
+      - pattern: tempfile.mktemp(...)
+    message: >
+      tempfile.mktemp() is insecure (TOCTOU race). Use
+      tempfile.mkstemp() or tempfile.NamedTemporaryFile() instead.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: CWE-377
+
+  - id: packet-profiler-no-sql-fstring
+    patterns:
+      - pattern-either:
+          - pattern: $CONN.execute(f"...{$X}...")
+          - pattern: $CONN.executemany(f"...{$X}...")
+    message: >
+      Do not interpolate values into SQL strings with f-strings — use
+      parameterized queries (?, ?) to prevent SQL injection. Client IPs
+      and BPF filters can flow into queries.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: CWE-89
+
+  - id: packet-profiler-bare-except
+    patterns:
+      - pattern: |
+          try:
+            ...
+          except:
+            ...
+    message: >
+      Bare except swallows KeyboardInterrupt and SystemExit, and hides
+      programming errors. Catch a specific exception type instead — the
+      pcap parser already does this in two places intentionally.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      category: best-practice

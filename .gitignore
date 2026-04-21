@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+*.egg-info/
+build/
+dist/
+
+# Captured data — never commit
+captures/*.pcap
+data/*.duckdb
+data/*.parquet
+data/*.wal
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/

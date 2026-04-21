@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "packet-profiler"
+version = "0.1.0"
+description = "Capture network traffic and profile client behavior from pcap files"
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "michaelsc44" }]
+
+dependencies = [
+    "dpkt>=1.9.8",
+    "duckdb>=1.0",
+    "click>=8.1",
+    "rich>=13.7",
+    "tomli>=2.0;python_version<'3.11'",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+    "types-pyyaml",
+]
+enrich = [
+    "geoip2>=4.8",
+    "manuf>=1.1.5",       # MAC OUI lookups
+]
+
+[project.scripts]
+ppcap = "profiler.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
