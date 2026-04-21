@@ -1,4 +1,5 @@
 """Command-line interface for ppcap."""
+
 from __future__ import annotations
 
 import json
@@ -7,7 +8,6 @@ from pathlib import Path
 
 import click
 from rich.console import Console
-from rich.table import Table
 
 from . import __version__
 from .capture import CaptureConfig, run_capture
@@ -25,16 +25,51 @@ def main() -> None:
     """Network Packet Profiler — capture and profile client traffic."""
 
 
+# ---------------------------------------------------------------------------
+# capture
+# ---------------------------------------------------------------------------
+
+
 @main.command()
-@click.option("--iface", "-i", required=True, help="Network interface (e.g., eth0)")
-@click.option("--output", "-o", type=click.Path(file_okay=False), default="./captures",
-              help="Directory for rotated pcap files")
+@click.option("--iface", "-i", required=True, help="Network interface (e.g., eth0, wlan0)")
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(file_okay=False),
+    default="./captures",
+    help="Directory for rotated pcap files",
+)
 @click.option("--rotate", type=int, default=300, help="Rotation interval in seconds")
 @click.option("--max-files", type=int, default=288, help="Max rotated files to keep")
 @click.option("--snaplen", type=int, default=256, help="Bytes to capture per packet")
 @click.option("--filter", "bpf", default="", help="Optional BPF filter expression")
-def capture(iface: str, output: str, rotate: int, max_files: int, snaplen: int, bpf: str) -> None:
-    """Run tcpdump with rotation until Ctrl-C."""
+@click.option(
+    "--wifi",
+    "wifi_mode",
+    is_flag=True,
+    help="Enable WiFi monitor mode (requires root/CAP_NET_ADMIN)",
+)
+@click.option("--no-hop", is_flag=True, help="Disable channel hopping when using --wifi")
+@click.option(
+    "--channel", type=int, default=None, help="Fix to a specific WiFi channel (implies --no-hop)"
+)
+def capture(
+    iface: str,
+    output: str,
+    rotate: int,
+    max_files: int,
+    snaplen: int,
+    bpf: str,
+    wifi_mode: bool,
+    no_hop: bool,
+    channel: int | None,
+) -> None:
+    """Run tcpdump with rotation until Ctrl-C.
+
+    Use --wifi to enable monitor mode for passive WiFi capture.
+    Channel hopping is enabled by default in WiFi mode; use --channel N to
+    fix to a single channel or --no-hop to disable.
+    """
     cfg = CaptureConfig(
         interface=iface,
         output_dir=Path(output),
@@ -42,13 +77,52 @@ def capture(iface: str, output: str, rotate: int, max_files: int, snaplen: int, 
         max_files=max_files,
         snaplen=snaplen,
         bpf_filter=bpf,
+        wifi_mode=wifi_mode,
+        channel_hop=not no_hop and channel is None,
+        channel=channel,
     )
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
-    console.print(f"[green]▶[/] Starting capture on [bold]{iface}[/] → {output}")
+
+    if wifi_mode:
+        console.print(
+            f"[green]▶[/] WiFi capture on [bold]{iface}[/] "
+            f"{'(channel ' + str(channel) + ')' if channel else '(channel hopping)'} → {output}"
+        )
+    else:
+        console.print(f"[green]▶[/] Starting capture on [bold]{iface}[/] → {output}")
+
     try:
         run_capture(cfg)
     except KeyboardInterrupt:
         console.print("\n[yellow]⏹[/] Capture stopped.")
+
+
+# ---------------------------------------------------------------------------
+# wifi subcommand group
+# ---------------------------------------------------------------------------
+
+
+@main.group()
+def wifi() -> None:
+    """WiFi interface utilities."""
+
+
+@wifi.command("list-interfaces")
+def wifi_list_interfaces() -> None:
+    """List available wireless interfaces."""
+    from .wifi import list_wifi_interfaces  # noqa: PLC0415
+
+    ifaces = list_wifi_interfaces()
+    if not ifaces:
+        console.print("[yellow]No wireless interfaces found (is `iw` installed?)[/]")
+        return
+    for iface in ifaces:
+        console.print(f"  [cyan]{iface}[/]")
+
+
+# ---------------------------------------------------------------------------
+# analyze (parse pcaps → DB)
+# ---------------------------------------------------------------------------
 
 
 @main.command()
@@ -71,6 +145,11 @@ def analyze(pcaps: tuple[str, ...], db: str) -> None:
     console.print("[cyan]→[/] building profiles")
     build_profiles(store)
     console.print(f"[green]✓[/] done — {total_flows:,} flows total")
+
+
+# ---------------------------------------------------------------------------
+# report
+# ---------------------------------------------------------------------------
 
 
 @main.command()
@@ -100,6 +179,109 @@ def report(db: str, top: int, client: str | None, as_json: bool) -> None:
             click.echo(json.dumps(talkers, indent=2, default=str))
         else:
             console.print(format_top_talkers(talkers))
+
+
+# ---------------------------------------------------------------------------
+# ai-profile (AI analysis via Claude)
+# ---------------------------------------------------------------------------
+
+
+@main.command("ai-profile")
+@click.option("--db", default="./data/profiles.duckdb", help="DuckDB database path")
+@click.option("--client", "client_ip", default=None, help="Analyze a specific client IP")
+@click.option("--all", "analyze_all", is_flag=True, help="Analyze all clients in the database")
+@click.option(
+    "--network-summary", is_flag=True, help="Generate a network-level summary across all clients"
+)
+@click.option(
+    "--output-dir",
+    type=click.Path(file_okay=False),
+    default=None,
+    help="Save individual client analyses as <ip>.md here (--all only)",
+)
+def ai_profile(
+    db: str,
+    client_ip: str | None,
+    analyze_all: bool,
+    network_summary: bool,
+    output_dir: str | None,
+) -> None:
+    """Analyze client profiles with Claude AI.
+
+    Requires ANTHROPIC_API_KEY environment variable.
+
+    Examples:
+
+      ppcap ai-profile --client 192.168.1.42
+
+      ppcap ai-profile --all --output-dir ./reports/
+
+      ppcap ai-profile --network-summary
+    """
+    if not Path(db).exists():
+        console.print(f"[red]✗[/] database not found: {db}")
+        sys.exit(1)
+
+    try:
+        from .ai_analysis import analyze_client, analyze_all_clients, summarize_network  # noqa: PLC0415
+    except RuntimeError as exc:
+        console.print(f"[red]✗[/] {exc}")
+        sys.exit(1)
+
+    store = Storage(Path(db))
+
+    def _render(text: str) -> None:
+        try:
+            from rich.markdown import Markdown  # noqa: PLC0415
+
+            console.print(Markdown(text))
+        except Exception:  # noqa: BLE001
+            click.echo(text)
+
+    if client_ip:
+        profile = store.get_profile(client_ip)
+        if profile is None:
+            console.print(f"[red]✗[/] no profile for {client_ip}")
+            sys.exit(1)
+        console.print(f"[cyan]→[/] analyzing {client_ip} with Claude…")
+        flows = store.get_recent_flows(client_ip, limit=50)
+        try:
+            result = analyze_client(profile, flows)
+        except RuntimeError as exc:
+            console.print(f"[red]✗[/] {exc}")
+            sys.exit(1)
+        _render(result)
+
+    elif analyze_all:
+        out_path = Path(output_dir) if output_dir else None
+        console.print("[cyan]→[/] analyzing all clients with Claude…")
+        try:
+            results = analyze_all_clients(store, output_dir=out_path)
+        except RuntimeError as exc:
+            console.print(f"[red]✗[/] {exc}")
+            sys.exit(1)
+        for ip, analysis in results.items():
+            console.rule(f"[bold]{ip}[/]")
+            _render(analysis)
+        if out_path:
+            console.print(f"\n[green]✓[/] Saved {len(results)} reports to {out_path}")
+
+    elif network_summary:
+        profiles = store.get_all_profiles()
+        if not profiles:
+            console.print("[yellow]No profiles in database yet.[/]")
+            sys.exit(0)
+        console.print(f"[cyan]→[/] generating network summary for {len(profiles)} clients…")
+        try:
+            summary = summarize_network(profiles)
+        except RuntimeError as exc:
+            console.print(f"[red]✗[/] {exc}")
+            sys.exit(1)
+        _render(summary)
+
+    else:
+        console.print("Specify --client <ip>, --all, or --network-summary.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

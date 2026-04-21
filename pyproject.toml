@@ -27,10 +27,14 @@ dev = [
     "ruff",
     "mypy",
     "types-pyyaml",
+    "anthropic>=0.40.0",  # needed for test mocking
 ]
 enrich = [
     "geoip2>=4.8",
     "manuf>=1.1.5",       # MAC OUI lookups
+]
+ai = [
+    "anthropic>=0.40.0",
 ]
 
 [project.scripts]

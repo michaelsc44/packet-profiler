@@ -9,10 +9,12 @@ A tool for capturing network traffic and generating behavioral profiles of clien
 ## Features
 
 - **Rotating capture** via `tcpdump` with size and time limits
-- **Flow extraction** from `.pcap` files (L2 → L7 metadata)
+- **WiFi monitor mode** — passive 802.11 capture with automatic channel hopping
+- **Flow extraction** from `.pcap` files (L2 → L7 metadata; Ethernet and radiotap 802.11)
 - **Per-client profiling**: traffic volume, destination mix, protocol distribution, active hours
 - **Device fingerprinting**: MAC OUI → vendor, DHCP fingerprints, JA3 TLS hashes, User-Agent strings
 - **DNS & SNI visibility** for destination classification even when payloads are encrypted
+- **AI analysis** — Claude-powered natural-language interpretation of each client profile
 - **Storage** in DuckDB with Parquet archival
 - **CLI reports** and JSON export; optional dashboard
 
@@ -40,19 +42,85 @@ ppcap report --db ./data/profiles.duckdb --client 192.168.1.42 --json
 
 ---
 
+## WiFi Monitor Mode Capture
+
+Passive 802.11 capture lets you observe all clients on a wireless network — useful for home network audits and IoT device discovery.
+
+```bash
+# List wireless interfaces
+ppcap wifi list-interfaces
+
+# Capture on wlan0 with automatic channel hopping (2.4 GHz + 5 GHz)
+# Requires root or CAP_NET_ADMIN + CAP_NET_RAW
+sudo ppcap capture --iface wlan0 --wifi --output ./wifi-captures/
+
+# Fix to a single channel (e.g. channel 6)
+sudo ppcap capture --iface wlan0 --wifi --channel 6 --output ./wifi-captures/
+
+# Disable channel hopping (stay on whatever channel the NIC is on)
+sudo ppcap capture --iface wlan0 --wifi --no-hop --output ./wifi-captures/
+```
+
+**Requirements:**
+- `iw` (preferred) or `airmon-ng` for monitor mode management
+- `tcpdump` ≥ 4.x with 802.11 radiotap support
+- Root or `CAP_NET_ADMIN` + `CAP_NET_RAW` capabilities
+
+Monitor mode is enabled automatically on entry and restored to managed mode on exit (even if capture is interrupted with Ctrl-C).
+
+---
+
+## AI Client Analysis
+
+After running `analyze`, use Claude to interpret each client's behavioral profile:
+
+```bash
+# Set your Anthropic API key
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# Install the AI extra
+pip install -e ".[ai]"
+
+# Analyze a single client
+ppcap ai-profile --client 192.168.1.42
+
+# Analyze all clients, saving reports as markdown files
+ppcap ai-profile --all --output-dir ./reports/
+
+# Generate a network-level summary across all clients
+ppcap ai-profile --network-summary
+```
+
+Claude provides a structured analysis for each client covering:
+
+1. **Device type** — smartphone, laptop, IoT sensor, etc. with confidence level
+2. **Behavioral profile** — streaming, web browsing, cloud sync, IoT telemetry, gaming, etc.
+3. **Anomalies / red flags** — unexpected ports, beaconing, non-standard DNS, high-volume uploads
+4. **Privacy & data exposure** — cleartext DNS queries, non-private SNI, exposed service names
+
+The system prompt is cached across batch calls for efficiency (prompt caching via the Anthropic API).
+
+---
+
 ## Architecture
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌──────────────┐     ┌────────────┐
 │  tcpdump    │────▶│  .pcap files │────▶│  Parser      │────▶│  DuckDB    │
-│  (capture)  │     │  (rotated)   │     │  (dpkt)      │     │  (flows)   │
-└─────────────┘     └──────────────┘     └──────────────┘     └─────┬──────┘
-                                                                    │
-                                          ┌─────────────┐           ▼
-                                          │  Reports /  │◀───┌──────────────┐
-                                          │  Dashboard  │    │  Profiler    │
-                                          └─────────────┘    │  (aggregate) │
-                                                             └──────────────┘
+│  (Ethernet) │     │  (rotated)   │     │  (dpkt)      │     │  (flows)   │
+└─────────────┘     └──────────────┘     │  Ethernet +  │     └─────┬──────┘
+                                         │  Radiotap    │           │
+┌─────────────┐     ┌──────────────┐     │  802.11      │           ▼
+│  tcpdump    │────▶│  .pcap files │────▶└──────────────┘     ┌──────────────┐
+│  (WiFi mon) │     │  (rotated)   │                          │  Profiler    │
+└─────────────┘     └──────────────┘                          │  (aggregate) │
+       ▲                                                       └──────┬───────┘
+       │                                                              │
+┌─────────────┐                          ┌─────────────┐             ▼
+│ MonitorCtx  │                          │  Reports /  │◀───┌──────────────┐
+│  (iw/      │                          │  JSON export│    │  Claude AI   │
+│  airmon-ng) │                          └─────────────┘    │  (ai-profile)│
+└─────────────┘                                             └──────────────┘
 ```
 
 See [`docs/design.md`](docs/design.md) for the full design document.
@@ -66,11 +134,13 @@ packet-profiler/
 ├── src/profiler/
 │   ├── __init__.py
 │   ├── cli.py            # entry point: ppcap
-│   ├── capture.py        # tcpdump wrapper
-│   ├── parser.py         # pcap → flow records
+│   ├── capture.py        # tcpdump wrapper (Ethernet + WiFi)
+│   ├── wifi.py           # monitor mode management (iw/airmon-ng)
+│   ├── parser.py         # pcap → flow records (Ethernet + radiotap 802.11)
 │   ├── fingerprint.py    # JA3, OUI, DHCP, UA
 │   ├── profiler.py       # per-client aggregation
 │   ├── storage.py        # DuckDB schema + queries
+│   ├── ai_analysis.py    # Claude AI profile analysis
 │   └── report.py         # CLI/JSON output
 ├── tests/                # pytest suite with sample pcaps
 ├── captures/             # rotating .pcap output (gitignored)
@@ -132,9 +202,9 @@ flow_timeout = 120
 ## Development
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev,ai]"
 pytest
-ruff check src/
+ruff check src/ tests/
 mypy src/
 ```
 
@@ -145,7 +215,9 @@ Sample pcaps for tests are pulled from the public Wireshark capture library — 
 ## Roadmap
 
 - [x] MVP: capture → parse → top talkers
-- [ ] Enrichment: DNS/SNI, OUI, GeoIP
+- [x] WiFi monitor mode capture (802.11 radiotap, channel hopping)
+- [x] AI-powered client profiling via Claude
+- [ ] Enrichment: OUI, GeoIP
 - [ ] Fingerprinting: JA3, p0f-style OS guess
 - [ ] Behavioral baselines + anomaly flags
 - [ ] Web dashboard
