@@ -95,6 +95,9 @@ def capture(
         run_capture(cfg)
     except KeyboardInterrupt:
         console.print("\n[yellow]⏹[/] Capture stopped.")
+    except RuntimeError as exc:
+        console.print(f"[red]✗[/] {exc}")
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------

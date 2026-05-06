@@ -156,6 +156,11 @@ def _parse_80211(buf: bytes) -> tuple[bytes | None, str, str, int | None]:
     addr2 = _mac(buf[10:16])
     addr3 = _mac(buf[16:22])
 
+    # Standard header is 24 bytes; QoS data adds 2 more
+    hdr_len = 24
+    if frame_subtype & 0x8:  # QoS data
+        hdr_len += 2
+
     if not to_ds and not from_ds:
         dst_mac, src_mac = addr1, addr2
     elif to_ds and not from_ds:
@@ -163,17 +168,12 @@ def _parse_80211(buf: bytes) -> tuple[bytes | None, str, str, int | None]:
     elif not to_ds and from_ds:
         dst_mac, src_mac = addr1, addr3
     else:
-        # WDS: addr4 starts at offset 24; header is 30 bytes
+        # WDS (4-address): addr4 at offset 24 adds 6 bytes to header
         if len(buf) < 30:
             return None, "", "", None
         src_mac = _mac(buf[24:30])
         dst_mac = addr3
-        buf = buf[30:]  # skip to LLC
-
-    # Standard header is 24 bytes; QoS data adds 2 more
-    hdr_len = 24
-    if frame_subtype & 0x8:  # QoS data
-        hdr_len += 2
+        hdr_len += 6
 
     payload = buf[hdr_len:]
 
