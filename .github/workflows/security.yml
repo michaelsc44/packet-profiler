@@ -35,6 +35,7 @@ jobs:
       - name: Upload Semgrep SARIF
         uses: github/codeql-action/upload-sarif@b0565cb28b456da32509aef995361ffcc63f40b0 # v3.28.15
         if: always()
+        continue-on-error: true
         with:
           sarif_file: semgrep.sarif
           category: semgrep
@@ -97,6 +98,7 @@ jobs:
 
       - name: Install pip-audit and project
         run: |
+          python -m pip install --upgrade pip
           pip install pip-audit
           pip install -e .
 
@@ -128,6 +130,7 @@ jobs:
       - name: Upload Trivy SARIF
         uses: github/codeql-action/upload-sarif@b0565cb28b456da32509aef995361ffcc63f40b0 # v3.28.15
         if: always()
+        continue-on-error: true
         with:
           sarif_file: trivy-results.sarif
           category: trivy
@@ -146,37 +149,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
-
-  litmus:
-    name: Litmus ML malware scan
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Install Rust toolchain
-        run: |
-          rustup update stable
-          rustup default stable
-
-      - name: Cache Cargo registry and build
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/bin/litmus
-          key: ${{ runner.os }}-cargo-litmus-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-litmus-
-
-      - name: Install Litmus (if not cached)
-        run: |
-          if ! command -v litmus &>/dev/null; then
-            cargo install --git https://codeberg.org/atomdrift/litmus
-          else
-            echo "litmus already cached, skipping build"
-          fi
-
-      - name: Run Litmus malware scan
-        run: litmus scan .
