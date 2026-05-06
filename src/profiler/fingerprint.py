@@ -3,6 +3,7 @@
 Most of these are stubs that point at real libraries you can plug in via the
 `enrich` optional dependency group. Kept separate so the core parser stays lean.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -10,20 +11,21 @@ from dataclasses import dataclass
 
 @dataclass
 class DeviceGuess:
-    os_family: str | None = None       # "linux" | "macos" | "windows" | "ios" | "android" | ...
-    device_type: str | None = None     # "laptop" | "phone" | "iot" | "router" | ...
-    vendor: str | None = None          # from OUI
-    confidence: str = "low"            # "low" | "medium" | "high"
+    os_family: str | None = None  # "linux" | "macos" | "windows" | "ios" | "android" | ...
+    device_type: str | None = None  # "laptop" | "phone" | "iot" | "router" | ...
+    vendor: str | None = None  # from OUI
+    confidence: str = "low"  # "low" | "medium" | "high"
 
 
 def vendor_from_mac(mac: str) -> str | None:
     """Look up vendor via OUI prefix. Requires `manuf` (install with [enrich])."""
     try:
-        from manuf import manuf  # type: ignore[import-not-found]
+        from manuf import manuf  # type: ignore[import-untyped]
     except ImportError:
         return None
     p = manuf.MacParser()
-    return p.get_manuf(mac)
+    result: str | None = p.get_manuf(mac)
+    return result
 
 
 def ja3_from_client_hello(client_hello: bytes) -> str | None:

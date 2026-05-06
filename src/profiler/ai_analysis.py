@@ -161,7 +161,7 @@ def analyze_client(
         ],
         messages=[{"role": "user", "content": prompt}],
     )
-    return response.content[0].text
+    return str(response.content[0].text)
 
 
 def analyze_all_clients(
@@ -240,4 +240,4 @@ def summarize_network(profiles: list[dict[str, Any]]) -> str:
         ],
         messages=[{"role": "user", "content": network_prompt}],
     )
-    return response.content[0].text
+    return str(response.content[0].text)

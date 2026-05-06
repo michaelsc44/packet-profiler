@@ -1,4 +1,5 @@
 """Aggregate stored flows into per-client profiles."""
+
 from __future__ import annotations
 
 from .storage import Storage
