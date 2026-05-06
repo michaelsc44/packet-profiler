@@ -91,7 +91,7 @@ def _format_profile_prompt(profile: dict[str, Any], flows_sample: list[dict[str,
 
     frac_tcp = profile.get("frac_tcp")
     frac_udp = profile.get("frac_udp")
-    if frac_tcp is not None:
+    if frac_tcp is not None and frac_udp is not None:
         lines.append(f"- **Protocol mix:** {frac_tcp * 100:.1f}% TCP / {frac_udp * 100:.1f}% UDP")
 
     signal = profile.get("signal_dbm")

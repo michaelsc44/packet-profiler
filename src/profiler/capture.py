@@ -88,4 +88,10 @@ def run_capture(cfg: CaptureConfig) -> None:
             argv.append(cfg.bpf_filter)
 
         # tcpdump runs until SIGINT; Click/main.py handles KeyboardInterrupt.
-        subprocess.run(argv, check=True)
+        try:
+            subprocess.run(argv, check=True)
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"tcpdump exited with code {exc.returncode} — "
+                "check interface name, permissions, or BPF filter syntax"
+            ) from exc
