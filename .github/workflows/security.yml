@@ -98,6 +98,7 @@ jobs:
 
       - name: Install pip-audit and project
         run: |
+          python -m pip install --upgrade pip
           pip install pip-audit
           pip install -e .
 

@@ -16,7 +16,7 @@ class Storage:
         self.db_path = db_path
         self.conn = duckdb.connect(str(db_path))
 
-    def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> duckdb.DuckDBPyRelation:
+    def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> duckdb.DuckDBPyConnection:
         return self.conn.execute(sql, params) if params else self.conn.execute(sql)
 
     def init_schema(self) -> None:

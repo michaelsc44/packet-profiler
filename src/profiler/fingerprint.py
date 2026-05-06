@@ -20,11 +20,12 @@ class DeviceGuess:
 def vendor_from_mac(mac: str) -> str | None:
     """Look up vendor via OUI prefix. Requires `manuf` (install with [enrich])."""
     try:
-        from manuf import manuf  # type: ignore[import-not-found]
+        from manuf import manuf  # type: ignore[import-untyped]
     except ImportError:
         return None
     p = manuf.MacParser()
-    return p.get_manuf(mac)
+    result: str | None = p.get_manuf(mac)
+    return result
 
 
 def ja3_from_client_hello(client_hello: bytes) -> str | None:
