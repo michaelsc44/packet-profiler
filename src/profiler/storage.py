@@ -94,12 +94,15 @@ class Storage:
         return [dict(zip(cols, row, strict=True)) for row in result]
 
     def top_talkers(self, limit: int = 10) -> list[dict[str, Any]]:
-        result = self.conn.execute(f"""
+        result = self.conn.execute(
+            """
             SELECT client_ip, mac, total_bytes, total_packets, unique_destinations
             FROM profiles
             ORDER BY total_bytes DESC
-            LIMIT {int(limit)}
-        """).fetchall()
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
         cols = ["client_ip", "mac", "total_bytes", "total_packets", "unique_destinations"]
         return [dict(zip(cols, row, strict=True)) for row in result]
 
