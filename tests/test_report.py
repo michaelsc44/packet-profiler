@@ -25,7 +25,7 @@ def test_fmt_bytes_megabytes() -> None:
 
 
 def test_fmt_bytes_gigabytes() -> None:
-    assert _fmt_bytes(1024 ** 3) == "1.0 GB"
+    assert _fmt_bytes(1024**3) == "1.0 GB"
 
 
 def test_fmt_bytes_zero() -> None:

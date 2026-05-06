@@ -8,7 +8,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import dpkt
-import pytest
 from click.testing import CliRunner
 
 from profiler.cli import main
@@ -89,9 +88,13 @@ def _make_test_pcap(tmp: str) -> Path:
     import socket
 
     tcp = dpkt.tcp.TCP(sport=54321, dport=443, data=b"")
-    ip = dpkt.ip.IP(src=socket.inet_aton("10.0.0.1"), dst=socket.inet_aton("1.1.1.1"), p=6, data=tcp)
+    ip = dpkt.ip.IP(
+        src=socket.inet_aton("10.0.0.1"), dst=socket.inet_aton("1.1.1.1"), p=6, data=tcp
+    )
     ip.len = len(ip)
-    eth = dpkt.ethernet.Ethernet(src=b"\xaa\xbb\xcc\xdd\xee\xff", dst=b"\x11\x22\x33\x44\x55\x66", data=ip)
+    eth = dpkt.ethernet.Ethernet(
+        src=b"\xaa\xbb\xcc\xdd\xee\xff", dst=b"\x11\x22\x33\x44\x55\x66", data=ip
+    )
 
     buf = io.BytesIO()
     writer = dpkt.pcap.Writer(buf)

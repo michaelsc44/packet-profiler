@@ -11,7 +11,6 @@ import dpkt
 import pytest
 
 from profiler.parser import (
-    Flow,
     _extract_sni,
     _mac,
     _parse_80211,
