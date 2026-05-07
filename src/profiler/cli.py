@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -21,8 +22,14 @@ console = Console()
 
 @click.group()
 @click.version_option(__version__, prog_name="ppcap")
-def main() -> None:
+@click.option("-v", "--verbose", is_flag=True, default=False, help="Enable debug logging.")
+@click.pass_context
+def main(ctx: click.Context, verbose: bool) -> None:
     """Network Packet Profiler — capture and profile client traffic."""
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.WARNING,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
 
 
 # ---------------------------------------------------------------------------

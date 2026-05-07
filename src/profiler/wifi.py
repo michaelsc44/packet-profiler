@@ -98,36 +98,74 @@ def _get_phy(iface: str) -> str:
 def enable_monitor_mode(iface: str) -> str:
     """Put *iface* into monitor mode and return the resulting interface name.
 
-    On iwlwifi (and other drivers that reject in-place type changes), creates a
-    new virtual monitor interface 'mon0' via `iw phy <phy> interface add`.
-    Falls back to `airmon-ng` if `iw` is unavailable.
-    Raises RuntimeError if neither tool can do the job.
+    Tries two iw approaches in order:
+      1. In-place type change (works on most drivers once NM is unmanaged and
+         rfkill is clear): down → set type monitor → up.
+      2. Virtual interface creation (required for iwlwifi): iw phy <phy>
+         interface add mon0 type monitor.
+    Falls back to airmon-ng if iw is unavailable.
+    Raises RuntimeError if nothing works.
     """
     if shutil.which("iw"):
         # Unmanage via NetworkManager first so it doesn't fight the mode switch.
         _nm_set_managed(iface, False)
+
+        # --- Approach 1: in-place type change ---
+        try:
+            logger.info("Attempting in-place monitor mode on %s", iface)
+            subprocess.run(["ip", "link", "set", iface, "down"], check=True, capture_output=True)
+            subprocess.run(
+                ["iw", "dev", iface, "set", "type", "monitor"], check=True, capture_output=True
+            )
+            subprocess.run(["ip", "link", "set", iface, "up"], check=True, capture_output=True)
+            info = subprocess.check_output(["iw", "dev", iface, "info"], text=True)
+            if "type monitor" in info:
+                logger.info("In-place monitor mode confirmed on %s", iface)
+                return iface
+            logger.warning(
+                "In-place type change succeeded but 'type monitor' not seen in iw dev info — "
+                "trying virtual interface"
+            )
+        except subprocess.CalledProcessError as exc:
+            logger.warning(
+                "In-place monitor mode failed on %s (%s) — trying virtual interface", iface, exc
+            )
+
+        # --- Approach 2: virtual monitor interface (iwlwifi) ---
         try:
             phy = _get_phy(iface)
             mon_iface = "mon0"
+            logger.info("Creating virtual monitor interface %s on %s", mon_iface, phy)
             subprocess.run(
                 ["iw", "phy", phy, "interface", "add", mon_iface, "type", "monitor"],
                 check=True,
                 capture_output=True,
             )
+            # Verify the kernel actually created the interface before proceeding.
+            logger.info("Verifying %s exists", mon_iface)
+            verify = subprocess.run(
+                ["iw", "dev", mon_iface, "info"], capture_output=True, text=True
+            )
+            if verify.returncode != 0:
+                raise RuntimeError(
+                    f"iw phy interface add returned 0 but {mon_iface} not found: "
+                    + verify.stderr.strip()
+                )
+            # NM will grab any new interface that appears; unmanage mon0 immediately.
+            _nm_set_managed(mon_iface, False)
+            logger.info("Bringing %s up", mon_iface)
             up = subprocess.run(["ip", "link", "set", mon_iface, "up"], capture_output=True)
             if up.returncode != 0:
                 logger.warning(
-                    "ip link set %s up returned %d — proceeding anyway; "
-                    "interface may still be usable in monitor mode",
+                    "ip link set %s up returned %d — proceeding; "
+                    "interface may be usable in monitor mode already",
                     mon_iface,
                     up.returncode,
                 )
-            logger.info(
-                "Monitor mode enabled on %s (phy=%s) via iw virtual interface", mon_iface, phy
-            )
+            logger.info("Monitor mode enabled on %s (phy=%s) via virtual interface", mon_iface, phy)
             return mon_iface
-        except subprocess.CalledProcessError as exc:
-            logger.warning("iw failed (%s), trying airmon-ng", exc)
+        except (subprocess.CalledProcessError, RuntimeError) as exc:
+            raise RuntimeError(f"Both iw approaches failed for {iface}: {exc}") from exc
 
     if shutil.which("airmon-ng"):
         try:
@@ -151,21 +189,21 @@ def enable_monitor_mode(iface: str) -> str:
     )
 
 
-def disable_monitor_mode(iface: str) -> None:
+def disable_monitor_mode(iface: str, original_iface: str | None = None) -> None:
     """Tear down monitor mode on *iface*. Best-effort — does not raise.
 
-    If *iface* is a virtual interface created by enable_monitor_mode (e.g. 'mon0'),
-    it is deleted with `iw dev <iface> del`.  For interfaces managed by airmon-ng,
-    `airmon-ng stop` is used instead.
+    *original_iface* is the physical interface that was unmanaged by NM during
+    enable; if provided, it is re-managed alongside *iface* on cleanup.
+
+    If *iface* is a virtual interface (e.g. 'mon0'), it is deleted with
+    `iw dev <iface> del`.  If deletion fails (in-place mode or airmon-ng),
+    falls back to restoring the type directly.
     """
     try:
         if shutil.which("iw"):
-            # Delete the virtual monitor interface. This is a no-op if the
-            # interface doesn't exist or wasn't created by us.
             result = subprocess.run(["iw", "dev", iface, "del"], capture_output=True, check=False)
             if result.returncode != 0:
-                # Fallback: interface may have been put into monitor mode in-place
-                # (e.g. via airmon-ng on some drivers) — restore type directly.
+                # In-place mode: restore type on the original interface directly.
                 subprocess.run(
                     ["ip", "link", "set", iface, "down"], capture_output=True, check=False
                 )
@@ -177,8 +215,10 @@ def disable_monitor_mode(iface: str) -> None:
                 subprocess.run(["ip", "link", "set", iface, "up"], capture_output=True, check=False)
         elif shutil.which("airmon-ng"):
             subprocess.run(["airmon-ng", "stop", iface], capture_output=True, check=False)
-        # Hand control back to NetworkManager if it was managing the interface before.
+        # Re-manage both the monitor interface and the original physical interface.
         _nm_set_managed(iface, True)
+        if original_iface and original_iface != iface:
+            _nm_set_managed(original_iface, True)
         logger.info("Monitor mode disabled on %s", iface)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not restore managed mode on %s: %s", iface, exc)
@@ -265,4 +305,4 @@ class MonitorContext:
         self._stop_event.set()
         if self._hop_thread and self._hop_thread.is_alive():
             self._hop_thread.join(timeout=2)
-        disable_monitor_mode(self._mon_iface)
+        disable_monitor_mode(self._mon_iface, original_iface=self.iface)
