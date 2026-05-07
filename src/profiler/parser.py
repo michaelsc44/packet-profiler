@@ -205,15 +205,19 @@ def parse_pcap(path: Path) -> Iterator[Flow]:
         pcap = dpkt.pcap.Reader(f)
         link_type = pcap.datalink()
 
-        for ts, buf in pcap:
-            try:
-                if link_type == dpkt.pcap.DLT_EN10MB:  # 1 = Ethernet
-                    yield from _parse_ethernet_packet(ts, buf)
-                elif link_type == 127:  # LINKTYPE_IEEE802_11_RADIOTAP
-                    yield from _parse_radiotap_packet(ts, buf)
-                # Other link types silently skipped
-            except Exception:  # noqa: BLE001
-                continue
+        try:
+            for ts, buf in pcap:
+                try:
+                    if link_type == dpkt.pcap.DLT_EN10MB:  # 1 = Ethernet
+                        yield from _parse_ethernet_packet(ts, buf)
+                    elif link_type == 127:  # LINKTYPE_IEEE802_11_RADIOTAP
+                        yield from _parse_radiotap_packet(ts, buf)
+                    # Other link types silently skipped
+                except Exception:  # noqa: BLE001
+                    continue
+        except Exception:  # noqa: BLE001
+            # Truncated pcap (e.g. killed mid-write): yield what was parsed so far
+            return
 
 
 def _parse_ethernet_packet(ts: float, buf: bytes) -> Iterator[Flow]:
