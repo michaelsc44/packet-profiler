@@ -8,36 +8,46 @@ A tool for capturing network traffic and generating behavioral profiles of clien
 
 ## Features
 
-- **Rotating capture** via `tcpdump` with size and time limits
-- **WiFi monitor mode** — passive 802.11 capture with automatic channel hopping
-- **Flow extraction** from `.pcap` files (L2 → L7 metadata; Ethernet and radiotap 802.11)
-- **Per-client profiling**: traffic volume, destination mix, protocol distribution, active hours
-- **Device fingerprinting**: MAC OUI → vendor, DHCP fingerprints, JA3 TLS hashes, User-Agent strings
-- **DNS & SNI visibility** for destination classification even when payloads are encrypted
+- **Rotating capture** via `tcpdump` with configurable time and file-count limits
+- **WiFi monitor mode** — passive 802.11 capture with automatic channel hopping (2.4 GHz + 5 GHz)
+- **Flow extraction** from `.pcap` files — Ethernet and radiotap 802.11, all four 802.11 DS-bit configurations
+- **Per-client profiling**: traffic volume, destination count, protocol distribution (TCP/UDP), unique ports
+- **DNS & SNI visibility** — destination classification even when payloads are encrypted
 - **AI analysis** — Claude-powered natural-language interpretation of each client profile
-- **Storage** in DuckDB with Parquet archival
-- **CLI reports** and JSON export; optional dashboard
+- **DuckDB storage** for fast local queries and JSON export
+- **Device fingerprinting stubs** — MAC OUI vendor lookup (requires `[enrich]`), JA3/DHCP placeholders
 
 ---
 
 ## Quick Start
 
 ```bash
-# Install
+# Clone and install
 git clone <repo-url> packet-profiler
 cd packet-profiler
-python -m venv .venv && source .venv/bin/activate
-pip install -e .
+
+# Debian/Ubuntu: install python3-venv if not present
+# sudo apt install python3.12-venv
+
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .                  # core only
+pip install -e ".[ai]"            # + Claude AI analysis
+pip install -e ".[dev,ai]"        # + dev tools (pytest, mypy, ruff)
 
 # Capture (requires root or CAP_NET_RAW)
 sudo ppcap capture --iface eth0 --rotate 300 --output ./captures/
 
-# Analyze
+# Analyze captured files
 ppcap analyze ./captures/*.pcap --db ./data/profiles.duckdb
 
-# Report
+# Report: top talkers table
 ppcap report --db ./data/profiles.duckdb --top 20
-ppcap report --db ./data/profiles.duckdb --client 192.168.1.42 --json
+
+# Report: single client profile
+ppcap report --db ./data/profiles.duckdb --client 192.168.1.42
+
+# Report: JSON export (all clients)
+ppcap report --db ./data/profiles.duckdb --json
 ```
 
 ---
@@ -68,6 +78,12 @@ sudo ppcap capture --iface wlan0 --wifi --no-hop --output ./wifi-captures/
 
 Monitor mode is enabled automatically on entry and restored to managed mode on exit (even if capture is interrupted with Ctrl-C).
 
+**Known limitations:**
+- Not all wireless drivers or chipsets support monitor mode — check your driver docs.
+- When using `airmon-ng`, the interface may be renamed (e.g., `wlan0` → `wlan0mon`); ppcap handles this automatically.
+- Channel hopping means the radio dwells on each channel for ~200 ms by default; short bursts of traffic on other channels may be missed. Use `--channel N` to focus on one channel.
+- WPA/WPA2 encrypted payload content is not decrypted; only 802.11 MAC headers and unencrypted management metadata are available.
+
 ---
 
 ## AI Client Analysis
@@ -78,17 +94,14 @@ After running `analyze`, use Claude to interpret each client's behavioral profil
 # Set your Anthropic API key
 export ANTHROPIC_API_KEY=sk-ant-...
 
-# Install the AI extra
-pip install -e ".[ai]"
-
 # Analyze a single client
-ppcap ai-profile --client 192.168.1.42
+ppcap ai-profile --db ./data/profiles.duckdb --client 192.168.1.42
 
 # Analyze all clients, saving reports as markdown files
-ppcap ai-profile --all --output-dir ./reports/
+ppcap ai-profile --db ./data/profiles.duckdb --all --output-dir ./reports/
 
 # Generate a network-level summary across all clients
-ppcap ai-profile --network-summary
+ppcap ai-profile --db ./data/profiles.duckdb --network-summary
 ```
 
 Claude provides a structured analysis for each client covering:
@@ -98,7 +111,7 @@ Claude provides a structured analysis for each client covering:
 3. **Anomalies / red flags** — unexpected ports, beaconing, non-standard DNS, high-volume uploads
 4. **Privacy & data exposure** — cleartext DNS queries, non-private SNI, exposed service names
 
-The system prompt is cached across batch calls for efficiency (prompt caching via the Anthropic API).
+The system prompt is cached across batch calls for efficiency (Anthropic prompt caching).
 
 ---
 
@@ -118,7 +131,7 @@ The system prompt is cached across batch calls for efficiency (prompt caching vi
        │                                                              │
 ┌─────────────┐                          ┌─────────────┐             ▼
 │ MonitorCtx  │                          │  Reports /  │◀───┌──────────────┐
-│  (iw/      │                          │  JSON export│    │  Claude AI   │
+│  (iw/       │                          │  JSON export│    │  Claude AI   │
 │  airmon-ng) │                          └─────────────┘    │  (ai-profile)│
 └─────────────┘                                             └──────────────┘
 ```
@@ -137,14 +150,14 @@ packet-profiler/
 │   ├── capture.py        # tcpdump wrapper (Ethernet + WiFi)
 │   ├── wifi.py           # monitor mode management (iw/airmon-ng)
 │   ├── parser.py         # pcap → flow records (Ethernet + radiotap 802.11)
-│   ├── fingerprint.py    # JA3, OUI, DHCP, UA
-│   ├── profiler.py       # per-client aggregation
+│   ├── fingerprint.py    # OUI vendor lookup; JA3/DHCP stubs
+│   ├── profiler.py       # per-client aggregation (SQL)
 │   ├── storage.py        # DuckDB schema + queries
 │   ├── ai_analysis.py    # Claude AI profile analysis
-│   └── report.py         # CLI/JSON output
-├── tests/                # pytest suite with sample pcaps
+│   └── report.py         # CLI table / JSON output
+├── tests/                # pytest suite (synthetic pcap fixtures via dpkt)
 ├── captures/             # rotating .pcap output (gitignored)
-├── data/                 # DuckDB + Parquet (gitignored)
+├── data/                 # DuckDB database (gitignored)
 ├── docs/
 │   └── design.md         # detailed design document
 ├── pyproject.toml
@@ -153,49 +166,43 @@ packet-profiler/
 
 ---
 
-## Configuration
+## Profile Schema
 
-Settings live in `~/.config/ppcap/config.toml` (or `./ppcap.toml` in the project root):
-
-```toml
-[capture]
-interface = "eth0"
-snaplen = 256          # header-only is usually enough
-rotate_seconds = 300
-max_files = 288        # 24h of 5-min rotations
-bpf_filter = "not port 22"
-
-[storage]
-db_path = "./data/profiles.duckdb"
-archive_parquet = true
-
-[profiling]
-client_idle_timeout = 600
-flow_timeout = 120
-```
-
----
-
-## Profile Output (example)
+The `ppcap report --json` command returns a list of client profiles. Each profile contains:
 
 ```json
 {
   "client_ip": "192.168.1.42",
   "mac": "3c:22:fb:xx:xx:xx",
-  "vendor": "Apple, Inc.",
-  "first_seen": "2026-04-18T09:12:04Z",
-  "last_seen": "2026-04-20T08:55:21Z",
-  "total_bytes": 4823194821,
-  "top_destinations": [
-    {"host": "gateway.icloud.com", "bytes": 812334112},
-    {"host": "api.github.com",     "bytes":  94820113}
-  ],
-  "protocol_mix": {"tcp": 0.91, "udp": 0.08, "other": 0.01},
-  "active_hours_utc": [8, 9, 10, 11, 13, 14, 15, 16, 17, 20, 21],
-  "tls_ja3": ["771,4865-4866-4867,...", "..."],
-  "device_guess": "macOS laptop (confidence: medium)"
+  "first_seen": 1700000000.0,
+  "last_seen": 1700003600.0,
+  "total_bytes": 4823194,
+  "total_packets": 5000,
+  "unique_destinations": 12,
+  "unique_dst_ports": 4,
+  "frac_tcp": 0.91,
+  "frac_udp": 0.09,
+  "sni_seen": ["gateway.icloud.com", "api.github.com"],
+  "dns_seen": ["gateway.icloud.com", "api.github.com"]
 }
 ```
+
+`first_seen` / `last_seen` are Unix timestamps (float). `sni_seen` and `dns_seen` are lists of distinct hostnames observed; both may be `null` if no TLS/DNS traffic was captured.
+
+---
+
+## Optional Enrichment
+
+Install the `[enrich]` extra for OUI vendor lookup:
+
+```bash
+pip install -e ".[enrich]"
+```
+
+This adds:
+- **MAC → vendor** via `manuf` (e.g., `aa:bb:cc:...` → `Apple, Inc.`), surfaced in `ai-profile` output
+
+JA3 TLS fingerprinting and DHCP OS fingerprinting are stubbed in `fingerprint.py` — pull requests welcome.
 
 ---
 
@@ -203,12 +210,16 @@ flow_timeout = 120
 
 ```bash
 pip install -e ".[dev,ai]"
+
+# Tests (all run without root or network access; WiFi paths are mocked)
 pytest
+
+# Linting / type checking
 ruff check src/ tests/
 mypy src/
 ```
 
-Sample pcaps for tests are pulled from the public Wireshark capture library — see `tests/README.md`.
+Tests use synthetic pcap fixtures built with `dpkt` — no external sample files required.
 
 ---
 
@@ -217,8 +228,9 @@ Sample pcaps for tests are pulled from the public Wireshark capture library — 
 - [x] MVP: capture → parse → top talkers
 - [x] WiFi monitor mode capture (802.11 radiotap, channel hopping)
 - [x] AI-powered client profiling via Claude
-- [ ] Enrichment: OUI, GeoIP
-- [ ] Fingerprinting: JA3, p0f-style OS guess
+- [x] Parameterized DuckDB queries (SQL injection fix)
+- [ ] Enrichment: OUI lookup via `[enrich]`, GeoIP
+- [ ] Fingerprinting: JA3 implementation, p0f-style OS guess
 - [ ] Behavioral baselines + anomaly flags
 - [ ] Web dashboard
 - [ ] Alerting hooks (webhook, syslog)
@@ -227,4 +239,4 @@ Sample pcaps for tests are pulled from the public Wireshark capture library — 
 
 ## License
 
-TBD (MIT recommended for tooling of this type).
+MIT — see [`LICENSE`](LICENSE).
