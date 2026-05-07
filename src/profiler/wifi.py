@@ -84,30 +84,48 @@ def _nm_set_managed(iface: str, managed: bool) -> None:
         logger.debug("NetworkManager: %s managed=%s", iface, state)
 
 
+def _get_phy(iface: str) -> str:
+    """Return the phy name (e.g. 'phy0') for *iface* by parsing `iw dev <iface> info`."""
+    out = subprocess.check_output(["iw", "dev", iface, "info"], text=True)
+    for line in out.splitlines():
+        parts = line.strip().split()
+        # Line looks like: "wiphy 0"
+        if len(parts) == 2 and parts[0] == "wiphy":
+            return f"phy{parts[1]}"
+    raise RuntimeError(f"Could not determine phy for interface {iface}")
+
+
 def enable_monitor_mode(iface: str) -> str:
     """Put *iface* into monitor mode and return the resulting interface name.
 
-    Tries `iw` first; falls back to `airmon-ng` if available.
+    On iwlwifi (and other drivers that reject in-place type changes), creates a
+    new virtual monitor interface 'mon0' via `iw phy <phy> interface add`.
+    Falls back to `airmon-ng` if `iw` is unavailable.
     Raises RuntimeError if neither tool can do the job.
     """
     if shutil.which("iw"):
         # Unmanage via NetworkManager first so it doesn't fight the mode switch.
         _nm_set_managed(iface, False)
         try:
-            subprocess.run(["ip", "link", "set", iface, "down"], check=True, capture_output=True)
+            phy = _get_phy(iface)
+            mon_iface = "mon0"
             subprocess.run(
-                ["iw", "dev", iface, "set", "type", "monitor"], check=True, capture_output=True
+                ["iw", "phy", phy, "interface", "add", mon_iface, "type", "monitor"],
+                check=True,
+                capture_output=True,
             )
-            up = subprocess.run(["ip", "link", "set", iface, "up"], capture_output=True)
+            up = subprocess.run(["ip", "link", "set", mon_iface, "up"], capture_output=True)
             if up.returncode != 0:
                 logger.warning(
                     "ip link set %s up returned %d — proceeding anyway; "
                     "interface may still be usable in monitor mode",
-                    iface,
+                    mon_iface,
                     up.returncode,
                 )
-            logger.info("Monitor mode enabled on %s via iw", iface)
-            return iface
+            logger.info(
+                "Monitor mode enabled on %s (phy=%s) via iw virtual interface", mon_iface, phy
+            )
+            return mon_iface
         except subprocess.CalledProcessError as exc:
             logger.warning("iw failed (%s), trying airmon-ng", exc)
 
@@ -134,14 +152,29 @@ def enable_monitor_mode(iface: str) -> str:
 
 
 def disable_monitor_mode(iface: str) -> None:
-    """Restore *iface* to managed mode. Best-effort — does not raise."""
+    """Tear down monitor mode on *iface*. Best-effort — does not raise.
+
+    If *iface* is a virtual interface created by enable_monitor_mode (e.g. 'mon0'),
+    it is deleted with `iw dev <iface> del`.  For interfaces managed by airmon-ng,
+    `airmon-ng stop` is used instead.
+    """
     try:
         if shutil.which("iw"):
-            subprocess.run(["ip", "link", "set", iface, "down"], capture_output=True, check=False)
-            subprocess.run(
-                ["iw", "dev", iface, "set", "type", "managed"], capture_output=True, check=False
-            )
-            subprocess.run(["ip", "link", "set", iface, "up"], capture_output=True, check=False)
+            # Delete the virtual monitor interface. This is a no-op if the
+            # interface doesn't exist or wasn't created by us.
+            result = subprocess.run(["iw", "dev", iface, "del"], capture_output=True, check=False)
+            if result.returncode != 0:
+                # Fallback: interface may have been put into monitor mode in-place
+                # (e.g. via airmon-ng on some drivers) — restore type directly.
+                subprocess.run(
+                    ["ip", "link", "set", iface, "down"], capture_output=True, check=False
+                )
+                subprocess.run(
+                    ["iw", "dev", iface, "set", "type", "managed"],
+                    capture_output=True,
+                    check=False,
+                )
+                subprocess.run(["ip", "link", "set", iface, "up"], capture_output=True, check=False)
         elif shutil.which("airmon-ng"):
             subprocess.run(["airmon-ng", "stop", iface], capture_output=True, check=False)
         # Hand control back to NetworkManager if it was managing the interface before.
