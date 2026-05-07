@@ -63,6 +63,27 @@ def list_wifi_interfaces() -> list[str]:
     return ifaces
 
 
+def _nm_set_managed(iface: str, managed: bool) -> None:
+    """Tell NetworkManager to manage or unmanage *iface*. No-op if nmcli absent."""
+    if shutil.which("nmcli") is None:
+        return
+    state = "yes" if managed else "no"
+    result = subprocess.run(
+        ["nmcli", "device", "set", iface, "managed", state],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        logger.warning(
+            "nmcli device set %s managed %s failed (code %d): %s",
+            iface,
+            state,
+            result.returncode,
+            result.stderr.decode(errors="replace").strip(),
+        )
+    else:
+        logger.debug("NetworkManager: %s managed=%s", iface, state)
+
+
 def enable_monitor_mode(iface: str) -> str:
     """Put *iface* into monitor mode and return the resulting interface name.
 
@@ -70,12 +91,21 @@ def enable_monitor_mode(iface: str) -> str:
     Raises RuntimeError if neither tool can do the job.
     """
     if shutil.which("iw"):
+        # Unmanage via NetworkManager first so it doesn't fight the mode switch.
+        _nm_set_managed(iface, False)
         try:
             subprocess.run(["ip", "link", "set", iface, "down"], check=True, capture_output=True)
             subprocess.run(
                 ["iw", "dev", iface, "set", "type", "monitor"], check=True, capture_output=True
             )
-            subprocess.run(["ip", "link", "set", iface, "up"], check=True, capture_output=True)
+            up = subprocess.run(["ip", "link", "set", iface, "up"], capture_output=True)
+            if up.returncode != 0:
+                logger.warning(
+                    "ip link set %s up returned %d — proceeding anyway; "
+                    "interface may still be usable in monitor mode",
+                    iface,
+                    up.returncode,
+                )
             logger.info("Monitor mode enabled on %s via iw", iface)
             return iface
         except subprocess.CalledProcessError as exc:
@@ -114,6 +144,8 @@ def disable_monitor_mode(iface: str) -> None:
             subprocess.run(["ip", "link", "set", iface, "up"], capture_output=True, check=False)
         elif shutil.which("airmon-ng"):
             subprocess.run(["airmon-ng", "stop", iface], capture_output=True, check=False)
+        # Hand control back to NetworkManager if it was managing the interface before.
+        _nm_set_managed(iface, True)
         logger.info("Monitor mode disabled on %s", iface)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not restore managed mode on %s: %s", iface, exc)
