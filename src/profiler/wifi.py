@@ -130,6 +130,9 @@ def enable_monitor_mode(iface: str) -> str:
             logger.warning(
                 "In-place monitor mode failed on %s (%s) — trying virtual interface", iface, exc
             )
+            # Restore the physical interface to UP so the phy is active for
+            # virtual interface creation (approach 2).  Ignore errors here.
+            subprocess.run(["ip", "link", "set", iface, "up"], capture_output=True, check=False)
 
         # --- Approach 2: virtual monitor interface (iwlwifi) ---
         try:

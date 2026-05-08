@@ -81,9 +81,13 @@ def run_capture(cfg: CaptureConfig) -> None:
             "-n",  # no name resolution during capture
         ]
         if cfg.wifi_mode:
-            # -e: include link-layer headers (needed for 802.11 MAC addresses)
-            # -I: request monitor mode from tcpdump as well (belt-and-suspenders)
-            argv += ["-e", "-I"]
+            # -e: include link-layer headers (needed for 802.11 MAC addresses).
+            # Do NOT pass -I here: monitor mode is already set up externally by
+            # MonitorContext/iw before tcpdump starts.  Asking tcpdump/libpcap to
+            # also enable rfmon (-I) on an interface that is already a monitor
+            # type causes "That device doesn't support monitor mode" on iwlwifi
+            # and similar drivers.
+            argv += ["-e"]
         if cfg.bpf_filter:
             argv.append(cfg.bpf_filter)
 
