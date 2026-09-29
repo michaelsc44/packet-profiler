@@ -212,7 +212,7 @@ def parse_pcap(path: Path) -> Iterator[Flow]:
                 elif link_type == 127:  # LINKTYPE_IEEE802_11_RADIOTAP
                     yield from _parse_radiotap_packet(ts, buf)
                 # Other link types silently skipped
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S112 -- best-effort parse, one bad packet must not stop the capture
                 continue
 
 
@@ -292,7 +292,7 @@ def _ip_to_flow(
                 if dns.qd:
                     qname = dns.qd[0].name
                     dns_query = qname if isinstance(qname, str) else qname.decode()
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110 -- DNS name is opportunistic, flow is still valid without it
                 pass
 
     return Flow(

@@ -19,7 +19,6 @@ from profiler.parser import (
     parse_pcap,
 )
 
-
 # ---------------------------------------------------------------------------
 # Pcap fixture helpers
 # ---------------------------------------------------------------------------
@@ -33,9 +32,8 @@ def _write_pcap(pkts: list[tuple[bytes, float]], link_type: int = dpkt.pcap.DLT_
         writer.writepkt(data, ts=ts)
     buf.seek(0)
 
-    tmp = tempfile.NamedTemporaryFile(suffix=".pcap", delete=False)
-    tmp.write(buf.read())
-    tmp.close()
+    with tempfile.NamedTemporaryFile(suffix=".pcap", delete=False) as tmp:
+        tmp.write(buf.read())
     return Path(tmp.name)
 
 
@@ -314,9 +312,8 @@ def test_parse_malformed_packet_skipped() -> None:
     writer.writepkt(good, ts=3.0)
     buf.seek(0)
 
-    tmp = tempfile.NamedTemporaryFile(suffix=".pcap", delete=False)
-    tmp.write(buf.read())
-    tmp.close()
+    with tempfile.NamedTemporaryFile(suffix=".pcap", delete=False) as tmp:
+        tmp.write(buf.read())
 
     flows = list(parse_pcap(Path(tmp.name)))
     # The two good packets parse; the malformed one is dropped
@@ -487,7 +484,7 @@ def test_parse_80211_wds_frame() -> None:
         dst_mac=b"\x11\x22\x33\x44\x55\x66",
         payload=llc,
     )
-    ip_data, src_mac, dst_mac, _ = _parse_80211(frame)
+    ip_data, _src_mac, _dst_mac, _ = _parse_80211(frame)
     # WDS frames should parse the IP payload correctly
     assert ip_data is not None
     assert len(ip_data) > 0

@@ -11,11 +11,10 @@ import pytest
 
 from profiler.ai_analysis import (
     _format_profile_prompt,
-    analyze_client,
     analyze_all_clients,
+    analyze_client,
     summarize_network,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

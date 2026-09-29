@@ -120,7 +120,7 @@ def wifi() -> None:
 @wifi.command("list-interfaces")
 def wifi_list_interfaces() -> None:
     """List available wireless interfaces."""
-    from .wifi import list_wifi_interfaces  # noqa: PLC0415
+    from .wifi import list_wifi_interfaces
 
     ifaces = list_wifi_interfaces()
     if not ifaces:
@@ -233,7 +233,11 @@ def ai_profile(
         sys.exit(1)
 
     try:
-        from .ai_analysis import analyze_client, analyze_all_clients, summarize_network  # noqa: PLC0415
+        from .ai_analysis import (
+            analyze_all_clients,
+            analyze_client,
+            summarize_network,
+        )
     except RuntimeError as exc:
         console.print(f"[red]✗[/] {exc}")
         sys.exit(1)
@@ -242,7 +246,7 @@ def ai_profile(
 
     def _render(text: str) -> None:
         try:
-            from rich.markdown import Markdown  # noqa: PLC0415
+            from rich.markdown import Markdown
 
             console.print(Markdown(text))
         except Exception:  # noqa: BLE001

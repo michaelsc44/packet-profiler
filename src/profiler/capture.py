@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator
 
 
 @dataclass
@@ -33,7 +33,7 @@ def _wifi_context(cfg: CaptureConfig) -> Iterator[str]:
         yield cfg.interface
         return
 
-    from .wifi import MonitorContext  # noqa: PLC0415
+    from .wifi import MonitorContext
 
     ctx = MonitorContext(
         iface=cfg.interface,

@@ -16,7 +16,6 @@ from profiler.wifi import (
     set_channel,
 )
 
-
 # ---------------------------------------------------------------------------
 # list_wifi_interfaces
 # ---------------------------------------------------------------------------
@@ -95,9 +94,11 @@ def test_enable_monitor_mode_iw_falls_back_to_airmon() -> None:
 
 
 def test_enable_monitor_mode_no_tools_raises() -> None:
-    with patch("shutil.which", return_value=None):
-        with pytest.raises(RuntimeError, match="iw.*airmon-ng"):
-            enable_monitor_mode("wlan0")
+    with (
+        patch("shutil.which", return_value=None),
+        pytest.raises(RuntimeError, match="iw.*airmon-ng"),
+    ):
+        enable_monitor_mode("wlan0")
 
 
 # ---------------------------------------------------------------------------
