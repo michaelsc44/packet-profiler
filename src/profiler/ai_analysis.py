@@ -54,7 +54,7 @@ def _get_client() -> Any:
             "  export ANTHROPIC_API_KEY=sk-ant-..."
         )
     try:
-        import anthropic  # noqa: PLC0415
+        import anthropic
     except ImportError as exc:
         raise RuntimeError("anthropic package not installed. Run: pip install anthropic") from exc
     return anthropic.Anthropic(api_key=api_key)
@@ -72,13 +72,13 @@ def _format_profile_prompt(profile: dict[str, Any], flows_sample: list[dict[str,
     if vendor:
         lines.append(f"- **Hardware vendor:** {vendor}")
 
-    import datetime  # noqa: PLC0415
+    import datetime
 
     for ts_field, label in [("first_seen", "First seen"), ("last_seen", "Last seen")]:
         ts = profile.get(ts_field)
         if ts:
             try:
-                dt = datetime.datetime.fromtimestamp(float(ts), tz=datetime.timezone.utc)
+                dt = datetime.datetime.fromtimestamp(float(ts), tz=datetime.UTC)
                 lines.append(f"- **{label}:** {dt.strftime('%Y-%m-%d %H:%M:%S UTC')}")
             except (ValueError, OSError):
                 lines.append(f"- **{label}:** {ts}")

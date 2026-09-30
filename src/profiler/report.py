@@ -7,7 +7,7 @@ from typing import Any
 from rich.table import Table
 
 
-def _fmt_bytes(n: int | float) -> str:
+def _fmt_bytes(n: float) -> str:
     n = float(n)
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if n < 1024:

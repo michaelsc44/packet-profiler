@@ -6,7 +6,6 @@ from rich.table import Table
 
 from profiler.report import _fmt_bytes, format_client_profile, format_top_talkers
 
-
 # ---------------------------------------------------------------------------
 # _fmt_bytes
 # ---------------------------------------------------------------------------

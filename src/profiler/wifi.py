@@ -71,6 +71,7 @@ def _nm_set_managed(iface: str, managed: bool) -> None:
     result = subprocess.run(
         ["nmcli", "device", "set", iface, "managed", state],
         capture_output=True,
+        check=False,
     )
     if result.returncode != 0:
         logger.warning(
@@ -147,7 +148,7 @@ def enable_monitor_mode(iface: str) -> str:
             # Verify the kernel actually created the interface before proceeding.
             logger.info("Verifying %s exists", mon_iface)
             verify = subprocess.run(
-                ["iw", "dev", mon_iface, "info"], capture_output=True, text=True
+                ["iw", "dev", mon_iface, "info"], capture_output=True, text=True, check=False
             )
             if verify.returncode != 0:
                 raise RuntimeError(
@@ -157,7 +158,9 @@ def enable_monitor_mode(iface: str) -> str:
             # NM will grab any new interface that appears; unmanage mon0 immediately.
             _nm_set_managed(mon_iface, False)
             logger.info("Bringing %s up", mon_iface)
-            up = subprocess.run(["ip", "link", "set", mon_iface, "up"], capture_output=True)
+            up = subprocess.run(
+                ["ip", "link", "set", mon_iface, "up"], capture_output=True, check=False
+            )
             if up.returncode != 0:
                 logger.warning(
                     "ip link set %s up returned %d — proceeding; "
@@ -235,7 +238,7 @@ def set_channel(iface: str, channel: int) -> None:
             capture_output=True,
             check=False,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001, S110 -- channel may not be supported, that's fine
         pass
 
 
